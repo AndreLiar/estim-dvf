@@ -19,11 +19,14 @@ interface EstimateResult {
   remainingToday: number | null;
   isPro: boolean;
   priceHistory: PriceHistory[] | null;
-  upgrade?: boolean;
 }
 
 function fmt(n: number) {
   return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
+}
+
+function fmtShort(n: number) {
+  return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(n) + " €";
 }
 
 async function startCheckout(plan: string) {
@@ -37,32 +40,22 @@ async function startCheckout(plan: string) {
 }
 
 function PriceHistoryChart({ data }: { data: PriceHistory[] }) {
-  if (!data.length) return null;
+  if (data.length < 2) return null;
   const max = Math.max(...data.map((d) => d.medianPricePerM2));
   const min = Math.min(...data.map((d) => d.medianPricePerM2));
   const range = max - min || 1;
 
   return (
-    <div style={{ marginTop: "1.25rem" }}>
-      <div style={{ fontSize: "0.8rem", fontWeight: 700, color: "var(--gray-500)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.75rem" }}>
-        Historique des prix / m²
-      </div>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: "6px", height: "80px" }}>
+    <div className="chart-section">
+      <div className="chart-label">Évolution du prix médian / m²</div>
+      <div className="chart-bars">
         {data.map((d) => {
-          const heightPct = 20 + ((d.medianPricePerM2 - min) / range) * 80;
+          const heightPct = 15 + ((d.medianPricePerM2 - min) / range) * 85;
           return (
-            <div key={d.year} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}>
-              <div style={{ fontSize: "0.65rem", color: "var(--gray-500)" }}>{fmt(d.medianPricePerM2).replace("€", "").trim()}</div>
-              <div
-                style={{
-                  width: "100%",
-                  height: `${heightPct}%`,
-                  background: "var(--blue)",
-                  borderRadius: "4px 4px 0 0",
-                  opacity: 0.8,
-                }}
-              />
-              <div style={{ fontSize: "0.65rem", color: "var(--gray-400)" }}>{d.year}</div>
+            <div key={d.year} className="chart-bar-col">
+              <div className="chart-bar-val">{fmtShort(d.medianPricePerM2)}</div>
+              <div className="chart-bar" style={{ height: `${heightPct}%` }} title={`${d.year}: ${fmt(d.medianPricePerM2)}/m²`} />
+              <div className="chart-bar-year">{d.year}</div>
             </div>
           );
         })}
@@ -76,7 +69,7 @@ function EstimatorForm() {
   const [type, setType] = useState("Appartement");
   const [surface, setSurface] = useState("");
   const [proToken, setProToken] = useState("");
-  const [showTokenInput, setShowTokenInput] = useState(false);
+  const [showToken, setShowToken] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<EstimateResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -90,23 +83,13 @@ function EstimatorForm() {
     setLimitReached(false);
 
     try {
-      const params = new URLSearchParams({
-        postalCode,
-        type,
-        surface,
-        ...(proToken ? { token: proToken } : {}),
-      });
-      const res = await fetch(`/api/estimate?${params.toString()}`);
+      const params = new URLSearchParams({ postalCode, type, surface, ...(proToken ? { token: proToken } : {}) });
+      const res = await fetch(`/api/estimate?${params}`);
       const data = await res.json();
 
-      if (res.status === 429) {
-        setLimitReached(true);
-        setError(data.error);
-      } else if (!res.ok) {
-        setError(data.error || "Une erreur est survenue.");
-      } else {
-        setResult(data);
-      }
+      if (res.status === 429) { setLimitReached(true); setError(data.error); }
+      else if (!res.ok) { setError(data.error || "Une erreur est survenue."); }
+      else { setResult(data); }
     } catch {
       setError("Impossible de contacter le serveur.");
     } finally {
@@ -114,31 +97,24 @@ function EstimatorForm() {
     }
   }
 
-  function handlePrint() {
-    window.print();
-  }
-
   return (
     <div className="card">
       <div className="card-header">
-        <span>🏠</span>
-        <h2>Estimez votre bien immobilier</h2>
-        <button
-          onClick={() => setShowTokenInput(!showTokenInput)}
-          style={{ marginLeft: "auto", fontSize: "0.75rem", color: "var(--blue)", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}
-        >
-          {showTokenInput ? "Masquer" : "Compte Pro?"}
+        <span className="card-header-title">Estimation immobilière</span>
+        <span className="card-header-tag">DVF Officiel</span>
+        <button className="pro-toggle" onClick={() => setShowToken(!showToken)}>
+          {showToken ? "Fermer" : "Compte Pro"}
         </button>
       </div>
+
       <div className="card-body">
         <form onSubmit={handleSubmit}>
-          {showTokenInput && (
+          {showToken && (
             <div className="form-group">
-              <label htmlFor="proToken">Token Pro</label>
+              <label>Token Pro</label>
               <input
-                id="proToken"
                 type="text"
-                placeholder="Collez votre token Pro ici"
+                placeholder="Collez votre token d'accès"
                 value={proToken}
                 onChange={(e) => setProToken(e.target.value)}
               />
@@ -146,11 +122,10 @@ function EstimatorForm() {
           )}
 
           <div className="form-group">
-            <label htmlFor="postalCode">Code postal</label>
+            <label>Code postal</label>
             <input
-              id="postalCode"
               type="text"
-              placeholder="Ex: 75011, 69001, 13001"
+              placeholder="75011"
               value={postalCode}
               onChange={(e) => setPostalCode(e.target.value)}
               maxLength={5}
@@ -161,18 +136,17 @@ function EstimatorForm() {
 
           <div className="form-row">
             <div className="form-group">
-              <label htmlFor="type">Type de bien</label>
-              <select id="type" value={type} onChange={(e) => setType(e.target.value)}>
+              <label>Type de bien</label>
+              <select value={type} onChange={(e) => setType(e.target.value)}>
                 <option value="Appartement">Appartement</option>
                 <option value="Maison">Maison</option>
               </select>
             </div>
             <div className="form-group">
-              <label htmlFor="surface">Surface (m²)</label>
+              <label>Surface (m²)</label>
               <input
-                id="surface"
                 type="number"
-                placeholder="Ex: 65"
+                placeholder="65"
                 min="5"
                 max="2000"
                 value={surface}
@@ -183,14 +157,14 @@ function EstimatorForm() {
           </div>
 
           <button type="submit" className="submit-btn" disabled={loading}>
-            {loading ? "Calcul en cours..." : "Estimer maintenant — Gratuit"}
+            {loading ? "Calcul en cours..." : "Estimer le bien"}
           </button>
         </form>
 
         {loading && (
           <div className="loading-box">
             <span className="spinner" />
-            Interrogation des données officielles DVF...
+            Interrogation des données DVF...
           </div>
         )}
 
@@ -199,7 +173,7 @@ function EstimatorForm() {
             {error}
             {limitReached && (
               <div style={{ marginTop: "0.75rem" }}>
-                <button onClick={() => startCheckout("pro")} className="btn btn-primary" style={{ fontSize: "0.875rem", padding: "0.5rem 1rem" }}>
+                <button onClick={() => startCheckout("pro")} className="btn btn-primary" style={{ fontSize: "0.78rem" }}>
                   Passer en Pro — 49€/mois
                 </button>
               </div>
@@ -209,33 +183,42 @@ function EstimatorForm() {
 
         {result && (
           <div className="result" id="print-result">
-            {result.isPro && (
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
-                <span className="badge-green" style={{ background: "var(--green-light)", color: "var(--green)", padding: "0.2rem 0.6rem", borderRadius: 99, fontSize: "0.75rem", fontWeight: 700 }}>
-                  Pro
-                </span>
-                <button onClick={handlePrint} className="btn btn-outline" style={{ fontSize: "0.8rem", padding: "0.35rem 0.85rem" }}>
-                  Exporter PDF
-                </button>
+            <div className="result-header">
+              <div className="result-meta">
+                <strong>{result.city}</strong><br />
+                {result.postalCode} · {result.type} · {result.surface} m²
+                {result.lastSaleDate && <><br />Dernière vente : {result.lastSaleDate}</>}
               </div>
-            )}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.5rem" }}>
+                {result.isPro && <span className="result-pro-badge">PRO</span>}
+                {result.isPro && (
+                  <button onClick={() => window.print()} className="btn btn-ghost" style={{ fontSize: "0.72rem", padding: "0.3rem 0.75rem" }}>
+                    Export PDF
+                  </button>
+                )}
+              </div>
+            </div>
 
-            <div className="result-city">{result.city} · {result.postalCode} · {result.type} · {result.surface} m²</div>
-            <div className="result-price">{fmt(result.estimatedPrice)}</div>
-            <div className="result-range">Fourchette : {fmt(result.estimatedMin)} — {fmt(result.estimatedMax)}</div>
+            <div className="result-price-block">
+              <div className="result-price-label">Estimation de valeur</div>
+              <div className="result-price">{fmt(result.estimatedPrice)}</div>
+              <div className="result-range">
+                {fmt(result.estimatedMin)} — {fmt(result.estimatedMax)}
+              </div>
+            </div>
 
             <div className="stats-grid">
               <div className="stat-box">
-                <div className="stat-value">{fmt(result.medianPricePerM2)}</div>
-                <div className="stat-label">Médiane / m²</div>
+                <span className="stat-value">{fmt(result.medianPricePerM2)}</span>
+                <span className="stat-label">Médiane /m²</span>
               </div>
               <div className="stat-box">
-                <div className="stat-value">{result.comparableSales}</div>
-                <div className="stat-label">Ventes analysées</div>
+                <span className="stat-value">{result.comparableSales}</span>
+                <span className="stat-label">Ventes analysées</span>
               </div>
               <div className="stat-box">
-                <div className="stat-value">{fmt(result.avgPricePerM2)}</div>
-                <div className="stat-label">Moyenne / m²</div>
+                <span className="stat-value">{fmt(result.avgPricePerM2)}</span>
+                <span className="stat-label">Moyenne /m²</span>
               </div>
             </div>
 
@@ -244,19 +227,20 @@ function EstimatorForm() {
             )}
 
             {!result.isPro && (
-              <div style={{ marginTop: "1rem", padding: "0.75rem", background: "var(--blue-light)", borderRadius: 8, fontSize: "0.8rem", color: "var(--blue)", textAlign: "center" }}>
-                Passez en <strong>Pro</strong> pour l&apos;historique des prix, l&apos;export PDF et les estimations illimitées.{" "}
-                <span style={{ cursor: "pointer", textDecoration: "underline", fontWeight: 700 }} onClick={() => startCheckout("pro")}>
-                  49€/mois
-                </span>
+              <div className="upsell-strip">
+                <div className="upsell-text">
+                  <strong>Pro</strong> — Historique des prix, export PDF, estimations illimitées.
+                </div>
+                <button onClick={() => startCheckout("pro")} className="btn btn-outline" style={{ whiteSpace: "nowrap", fontSize: "0.75rem" }}>
+                  49€ / mois
+                </button>
               </div>
             )}
 
             <div className="result-footer">
-              Source : DVF — data.gouv.fr
-              {result.lastSaleDate && ` · Dernière vente : ${result.lastSaleDate}`}
+              Source · Demandes de Valeurs Foncières (DVF) — data.gouv.fr · Licence Ouverte
               {result.remainingToday !== null && (
-                <span> · {result.remainingToday} estimation{result.remainingToday !== 1 ? "s" : ""} gratuite{result.remainingToday !== 1 ? "s" : ""} restante{result.remainingToday !== 1 ? "s" : ""} aujourd&apos;hui</span>
+                <> · {result.remainingToday} estimation{result.remainingToday !== 1 ? "s" : ""} gratuite{result.remainingToday !== 1 ? "s" : ""} restante{result.remainingToday !== 1 ? "s" : ""}</>
               )}
             </div>
           </div>
@@ -269,94 +253,149 @@ function EstimatorForm() {
 export default function Home() {
   return (
     <>
+      {/* NAV */}
       <nav className="nav">
-        <a href="/" className="nav-logo"><span>🏠</span> EstimDVF</a>
+        <a href="/" className="nav-logo">
+          Estim<span className="nav-logo-accent">DVF</span>
+        </a>
         <div className="nav-links">
-          <a href="#fonctionnement">Comment ça marche</a>
+          <a href="#fonctionnement">Méthode</a>
           <a href="#tarifs">Tarifs</a>
-          <a href="#tarifs" className="btn btn-primary">Commencer</a>
+          <button onClick={() => startCheckout("pro")} className="btn btn-primary" style={{ fontSize: "0.75rem" }}>
+            Accès Pro
+          </button>
         </div>
       </nav>
 
+      {/* HERO */}
       <section className="hero">
-        <div className="hero-badges">
-          <span className="badge">Données officielles gouvernementales</span>
-          <span className="badge">20 millions de transactions</span>
-          <span className="badge">Mis à jour en continu</span>
+        <div className="hero-grid-bg" />
+        <div className="hero-glow" />
+
+        <div className="hero-eyebrow">
+          Données officielles · Ministère des Finances
         </div>
-        <h1>Estimez votre bien immobilier<br />avec les <span>vraies données</span></h1>
-        <p>Basé sur les transactions DVF du gouvernement français. Pas d&apos;algorithme opaque — juste les prix réels du marché.</p>
+
+        <h1>
+          Le prix <em>réel</em><br />de l&apos;immobilier<br />français
+        </h1>
+
+        <p className="hero-sub">
+          Basé sur 20 millions de transactions notariées. Pas d&apos;algorithme opaque — uniquement les données DVF du gouvernement.
+        </p>
+
+        <div className="hero-stats">
+          <div className="hero-stat">
+            <span className="hero-stat-value">20M+</span>
+            <span className="hero-stat-label">Transactions</span>
+          </div>
+          <div className="hero-divider" />
+          <div className="hero-stat">
+            <span className="hero-stat-value">36 000</span>
+            <span className="hero-stat-label">Communes</span>
+          </div>
+          <div className="hero-divider" />
+          <div className="hero-stat">
+            <span className="hero-stat-value">100%</span>
+            <span className="hero-stat-label">Données officielles</span>
+          </div>
+        </div>
       </section>
 
-      <div className="estimator-wrapper">
+      {/* ESTIMATOR */}
+      <div className="estimator-section">
         <EstimatorForm />
       </div>
 
+      {/* FEATURES */}
       <section className="features" id="fonctionnement">
-        <div className="section-label">Pourquoi EstimDVF</div>
-        <h2 className="section-title">Des estimations basées sur la réalité</h2>
-        <p className="section-subtitle">
-          Contrairement aux autres outils, nous utilisons uniquement les transactions notariées officielles — pas des annonces ou des modèles prédictifs opaques.
+        <div className="section-eyebrow">Pourquoi EstimDVF</div>
+        <h2 className="section-title">La donnée brute,<br /><em>sans filtre</em></h2>
+        <p className="section-sub">
+          Contrairement aux agrégateurs qui modélisent, nous interrogeons directement les actes notariés enregistrés par l&apos;État.
         </p>
+
         <div className="features-grid">
-          <div className="feature-card"><div className="feature-icon">🏛️</div><h3>Source officielle</h3><p>Les données DVF viennent directement du Ministère des Finances — les mêmes que les notaires.</p></div>
-          <div className="feature-card"><div className="feature-icon">📊</div><h3>Statistiques robustes</h3><p>Médiane, moyenne, fourchette 10-90e percentile. Une analyse complète du marché local.</p></div>
-          <div className="feature-card"><div className="feature-icon">⚡</div><h3>Instantané</h3><p>Résultat en secondes. Pas d&apos;inscription, pas de formulaire, pas d&apos;agent commercial.</p></div>
-          <div className="feature-card"><div className="feature-icon">📈</div><h3>Historique des prix</h3><p>Visualisez l&apos;évolution des prix par année dans votre code postal (Pro).</p></div>
-          <div className="feature-card"><div className="feature-icon">📄</div><h3>Export PDF</h3><p>Générez un rapport PDF de l&apos;estimation à partager avec vos clients (Pro).</p></div>
-          <div className="feature-card"><div className="feature-icon">💼</div><h3>Usage professionnel</h3><p>Conçu pour les agents immobiliers, notaires, investisseurs et acheteurs exigeants.</p></div>
+          {[
+            { n: "01", title: "Source notariale", desc: "Les données DVF proviennent des actes authentiques transmis par les notaires à la DGFiP. C'est la référence légale." },
+            { n: "02", title: "Précision au code postal", desc: "Chaque estimation analyse les transactions réelles de votre secteur, pas une extrapolation régionale." },
+            { n: "03", title: "Statistiques robustes", desc: "Médiane, moyenne, percentiles 10-90. Une analyse complète pour une décision éclairée." },
+            { n: "04", title: "Historique des prix", desc: "Visualisez l'évolution du marché année par année dans votre zone. Disponible en version Pro." },
+            { n: "05", title: "Export PDF professionnel", desc: "Générez un rapport formaté à partager avec vos clients ou à joindre à un dossier de financement." },
+            { n: "06", title: "API documentée", desc: "Intégrez nos estimations dans vos applications métiers via une API REST simple et fiable." },
+          ].map((f) => (
+            <div className="feature-card" key={f.n}>
+              <div className="feature-num">{f.n}</div>
+              <h3>{f.title}</h3>
+              <p>{f.desc}</p>
+            </div>
+          ))}
         </div>
       </section>
 
+      {/* PRICING */}
       <section className="pricing" id="tarifs">
-        <div className="section-label">Tarifs</div>
-        <h2 className="section-title">Simple et transparent</h2>
-        <p className="section-subtitle" style={{ marginBottom: "3rem" }}>Commencez gratuitement. Passez au Pro quand vous avez besoin de plus.</p>
-        <div className="pricing-grid">
-          <div className="pricing-card">
-            <div className="pricing-name">Gratuit</div>
-            <div className="pricing-price">0€ <span>/ mois</span></div>
-            <div className="pricing-desc">Pour découvrir et usage occasionnel.</div>
-            <ul className="pricing-features">
-              <li>5 estimations / jour</li>
-              <li>Résultats complets</li>
-              <li>Données DVF officielles</li>
-            </ul>
-            <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} className="btn btn-outline btn-full">Commencer gratuitement</button>
-          </div>
+        <div style={{ maxWidth: 900, margin: "0 auto" }}>
+          <div className="section-eyebrow">Tarifs</div>
+          <h2 className="section-title" style={{ marginBottom: "0.5rem" }}>Simple.<br /><em>Transparent.</em></h2>
+          <p className="section-sub">Commencez gratuitement. Passez au Pro quand vous avez besoin de plus.</p>
 
-          <div className="pricing-card featured">
-            <div className="pricing-badge">Le plus populaire</div>
-            <div className="pricing-name">Pro</div>
-            <div className="pricing-price">49€ <span>/ mois</span></div>
-            <div className="pricing-desc">Pour les professionnels de l&apos;immobilier.</div>
-            <ul className="pricing-features">
-              <li>Estimations illimitées</li>
-              <li>Export PDF du rapport</li>
-              <li>Historique des prix</li>
-              <li>Support prioritaire</li>
-            </ul>
-            <button onClick={() => startCheckout("pro")} className="btn btn-primary btn-full">Démarrer l&apos;essai gratuit</button>
-          </div>
+          <div className="pricing-grid">
+            <div className="pricing-card">
+              <div className="pricing-name">Gratuit</div>
+              <div className="pricing-price">0€ <span>/ mois</span></div>
+              <div className="pricing-desc">Pour découvrir et usage occasionnel.</div>
+              <ul className="pricing-features">
+                <li>5 estimations / jour</li>
+                <li>Résultats complets</li>
+                <li>Données DVF officielles</li>
+              </ul>
+              <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} className="btn btn-ghost btn-full">
+                Commencer
+              </button>
+            </div>
 
-          <div className="pricing-card">
-            <div className="pricing-name">API</div>
-            <div className="pricing-price">199€ <span>/ mois</span></div>
-            <div className="pricing-desc">Pour intégrer dans vos applications.</div>
-            <ul className="pricing-features">
-              <li>10 000 requêtes / mois</li>
-              <li>API REST documentée</li>
-              <li>Accès prioritaire</li>
-              <li>Support dédié</li>
-            </ul>
-            <button onClick={() => startCheckout("api")} className="btn btn-outline btn-full">Commencer</button>
+            <div className="pricing-card featured">
+              <div className="pricing-name">Pro</div>
+              <div className="pricing-price">49€ <span>/ mois</span></div>
+              <div className="pricing-desc">Pour les professionnels de l&apos;immobilier.</div>
+              <ul className="pricing-features">
+                <li>Estimations illimitées</li>
+                <li>Historique des prix</li>
+                <li>Export PDF du rapport</li>
+                <li>Support prioritaire</li>
+              </ul>
+              <button onClick={() => startCheckout("pro")} className="btn btn-primary btn-full">
+                Démarrer l&apos;essai
+              </button>
+            </div>
+
+            <div className="pricing-card">
+              <div className="pricing-name">API</div>
+              <div className="pricing-price">199€ <span>/ mois</span></div>
+              <div className="pricing-desc">Pour intégrer dans vos applications.</div>
+              <ul className="pricing-features">
+                <li>10 000 requêtes / mois</li>
+                <li>API REST documentée</li>
+                <li>Accès prioritaire</li>
+                <li>Support dédié</li>
+              </ul>
+              <button onClick={() => startCheckout("api")} className="btn btn-outline btn-full">
+                Commencer
+              </button>
+            </div>
           </div>
         </div>
       </section>
 
+      {/* FOOTER */}
       <footer className="footer">
-        <p>EstimDVF — Données issues de <a href="https://www.data.gouv.fr" target="_blank" rel="noreferrer">data.gouv.fr</a> (DVF). Licence Ouverte.</p>
-        <p style={{ marginTop: "0.5rem" }}>© {new Date().getFullYear()} EstimDVF · <a href="mailto:support@dvfestimator.live">support@dvfestimator.live</a> · Tous droits réservés</p>
+        <span className="footer-logo">EstimDVF</span>
+        <span className="footer-copy">
+          Données · <a href="https://www.data.gouv.fr" target="_blank" rel="noreferrer">data.gouv.fr</a> (DVF) · Licence Ouverte
+          &nbsp;·&nbsp; <a href="mailto:support@dvfestimator.live">support@dvfestimator.live</a>
+          &nbsp;·&nbsp; © {new Date().getFullYear()}
+        </span>
       </footer>
     </>
   );
