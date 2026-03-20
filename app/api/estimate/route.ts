@@ -7,28 +7,27 @@ const TABULAR_API = `https://tabular-api.data.gouv.fr/api/resources/${DVF_RESOUR
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const postalCode = searchParams.get("postalCode")?.trim();
-  const type = searchParams.get("type"); // Appartement | Maison
+  const type = searchParams.get("type");
   const surface = parseFloat(searchParams.get("surface") || "0");
-  const proToken = searchParams.get("token"); // pro users pass their token
+  const proToken = searchParams.get("token") ?? null;
 
   if (!postalCode || !type || !surface || surface <= 0) {
     return NextResponse.json({ error: "Paramètres manquants ou invalides." }, { status: 400 });
   }
 
-  // Rate limiting
+  if (!/^\d{5}$/.test(postalCode)) {
+    return NextResponse.json({ error: "Code postal invalide (5 chiffres requis)." }, { status: 400 });
+  }
+
+  // Rate limiting — Supabase-backed
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0] ?? req.headers.get("x-real-ip") ?? "unknown";
-  const isPro = proToken === process.env.PRO_SECRET_TOKEN;
-  const { allowed, remaining } = checkRateLimit(ip, isPro);
+  const { allowed, remaining, isPro } = await checkRateLimit(ip, proToken);
 
   if (!allowed) {
     return NextResponse.json(
       { error: "Limite gratuite atteinte (5/jour). Passez en Pro pour un accès illimité.", upgrade: true },
       { status: 429 }
     );
-  }
-
-  if (!/^\d{5}$/.test(postalCode)) {
-    return NextResponse.json({ error: "Code postal invalide (5 chiffres requis)." }, { status: 400 });
   }
 
   try {
@@ -53,7 +52,6 @@ export async function GET(req: NextRequest) {
     const json = await res.json();
     const rows: Record<string, string | number | null>[] = json.data ?? [];
 
-    // Only keep rows with both a sale price and a surface area
     const valid = rows.filter(
       (r) =>
         r.valeur_fonciere &&
@@ -64,20 +62,16 @@ export async function GET(req: NextRequest) {
 
     if (valid.length < 3) {
       return NextResponse.json(
-        {
-          error: `Pas assez de données pour le code postal ${postalCode} (${type}). Essayez un code postal voisin.`,
-        },
+        { error: `Pas assez de données pour le code postal ${postalCode} (${type}). Essayez un code postal voisin.` },
         { status: 404 }
       );
     }
 
-    // City name from first result
     const cityName = String(valid[0].nom_commune ?? postalCode);
 
-    // Price per m² for each transaction
     const pricesPerM2 = valid
       .map((r) => Number(r.valeur_fonciere) / Number(r.surface_reelle_bati))
-      .filter((p) => p > 100 && p < 50000); // sanity filter
+      .filter((p) => p > 100 && p < 50000);
 
     pricesPerM2.sort((a, b) => a - b);
 
@@ -87,13 +81,31 @@ export async function GET(req: NextRequest) {
     const p90 = pricesPerM2[Math.floor(len * 0.9)];
     const avg = pricesPerM2.reduce((a, b) => a + b, 0) / len;
 
-    // Most recent sale date
     const dates = valid
       .map((r) => String(r.date_mutation ?? ""))
       .filter(Boolean)
       .sort()
       .reverse();
     const lastSaleDate = dates[0] ?? null;
+
+    // Price history by year (Pro feature)
+    const byYear: Record<string, number[]> = {};
+    for (const r of valid) {
+      const year = String(r.date_mutation ?? "").slice(0, 4);
+      if (!year) continue;
+      const ppm2 = Number(r.valeur_fonciere) / Number(r.surface_reelle_bati);
+      if (ppm2 > 100 && ppm2 < 50000) {
+        if (!byYear[year]) byYear[year] = [];
+        byYear[year].push(ppm2);
+      }
+    }
+
+    const priceHistory = Object.entries(byYear)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([year, prices]) => ({
+        year,
+        medianPricePerM2: Math.round(prices.sort((a, b) => a - b)[Math.floor(prices.length / 2)]),
+      }));
 
     return NextResponse.json({
       postalCode,
@@ -108,7 +120,9 @@ export async function GET(req: NextRequest) {
       comparableSales: valid.length,
       totalFound: json.meta?.total ?? rows.length,
       lastSaleDate,
-      remainingToday: remaining,
+      remainingToday: isPro ? null : remaining,
+      isPro,
+      priceHistory: isPro ? priceHistory : null, // only for Pro
     });
   } catch (err) {
     console.error("Estimate route error:", err);
