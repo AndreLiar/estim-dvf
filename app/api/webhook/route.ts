@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
           const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "https://dvf-estimator.vercel.app";
 
           await resend.emails.send({
-            from: "EstimDVF <noreply@estim-dvf.fr>",
+            from: "EstimDVF <noreply@dvfestimator.live>",
             to: email,
             subject: `Votre accès EstimDVF ${planLabel} — Token d'activation`,
             html: `
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
                 <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 2rem 0;" />
                 <p style="color: #9ca3af; font-size: 0.8rem;">
                   EstimDVF · Données officielles DVF — data.gouv.fr<br/>
-                  Pour toute question : support@estim-dvf.fr
+                  Pour toute question : support@dvfestimator.live
                 </p>
               </div>
             `,

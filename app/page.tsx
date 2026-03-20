@@ -356,7 +356,7 @@ export default function Home() {
 
       <footer className="footer">
         <p>EstimDVF — Données issues de <a href="https://www.data.gouv.fr" target="_blank" rel="noreferrer">data.gouv.fr</a> (DVF). Licence Ouverte.</p>
-        <p style={{ marginTop: "0.5rem" }}>© {new Date().getFullYear()} EstimDVF · Tous droits réservés</p>
+        <p style={{ marginTop: "0.5rem" }}>© {new Date().getFullYear()} EstimDVF · <a href="mailto:support@dvfestimator.live">support@dvfestimator.live</a> · Tous droits réservés</p>
       </footer>
     </>
   );
