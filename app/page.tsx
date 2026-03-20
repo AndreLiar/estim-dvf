@@ -14,6 +14,8 @@ interface EstimateResult {
   estimatedMax: number;
   comparableSales: number;
   lastSaleDate: string | null;
+  remainingToday: number;
+  upgrade?: boolean;
 }
 
 function fmt(n: number) {
@@ -24,6 +26,16 @@ function fmt(n: number) {
   }).format(n);
 }
 
+async function startCheckout(plan: string) {
+  const res = await fetch("/api/checkout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ plan }),
+  });
+  const data = await res.json();
+  if (data.url) window.location.href = data.url;
+}
+
 function EstimatorForm() {
   const [postalCode, setPostalCode] = useState("");
   const [type, setType] = useState("Appartement");
@@ -31,12 +43,14 @@ function EstimatorForm() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<EstimateResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [limitReached, setLimitReached] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setResult(null);
     setError(null);
+    setLimitReached(false);
 
     try {
       const res = await fetch(
@@ -44,7 +58,10 @@ function EstimatorForm() {
       );
       const data = await res.json();
 
-      if (!res.ok) {
+      if (res.status === 429) {
+        setLimitReached(true);
+        setError(data.error);
+      } else if (!res.ok) {
         setError(data.error || "Une erreur est survenue.");
       } else {
         setResult(data);
@@ -114,7 +131,22 @@ function EstimatorForm() {
           </div>
         )}
 
-        {error && <div className="error-box">{error}</div>}
+        {error && (
+          <div className="error-box">
+            {error}
+            {limitReached && (
+              <div style={{ marginTop: "0.75rem" }}>
+                <button
+                  onClick={() => startCheckout("pro")}
+                  className="btn btn-primary"
+                  style={{ fontSize: "0.875rem", padding: "0.5rem 1rem" }}
+                >
+                  Passer en Pro — 49€/mois
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {result && (
           <div className="result">
@@ -144,6 +176,9 @@ function EstimatorForm() {
             <div className="result-footer">
               Source : Demandes de Valeurs Foncières (DVF) — data.gouv.fr
               {result.lastSaleDate && ` · Dernière vente : ${result.lastSaleDate}`}
+              {typeof result.remainingToday === "number" && (
+                <span> · {result.remainingToday} estimation{result.remainingToday !== 1 ? "s" : ""} gratuite{result.remainingToday !== 1 ? "s" : ""} restante{result.remainingToday !== 1 ? "s" : ""} aujourd&apos;hui</span>
+              )}
             </div>
           </div>
         )}
@@ -246,7 +281,7 @@ export default function Home() {
               <li>Résultats complets</li>
               <li>Données DVF officielles</li>
             </ul>
-            <a href="#" className="btn btn-outline btn-full">Commencer gratuitement</a>
+            <button onClick={() => window.scrollTo({top: 0, behavior: "smooth"})} className="btn btn-outline btn-full">Commencer gratuitement</button>
           </div>
 
           <div className="pricing-card featured">
@@ -261,7 +296,7 @@ export default function Home() {
               <li>API access (100 req/jour)</li>
               <li>Support prioritaire</li>
             </ul>
-            <a href="#" className="btn btn-primary btn-full">Démarrer l&apos;essai gratuit</a>
+            <button onClick={() => startCheckout("pro")} className="btn btn-primary btn-full">Démarrer l&apos;essai gratuit</button>
           </div>
 
           <div className="pricing-card">
@@ -275,7 +310,7 @@ export default function Home() {
               <li>SLA 99.9%</li>
               <li>Support dédié</li>
             </ul>
-            <a href="#" className="btn btn-outline btn-full">Nous contacter</a>
+            <button onClick={() => startCheckout("api")} className="btn btn-outline btn-full">Nous contacter</button>
           </div>
         </div>
       </section>

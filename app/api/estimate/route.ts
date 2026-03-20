@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { checkRateLimit } from "@/lib/rateLimit";
 
 const DVF_RESOURCE_ID = "d7933994-2c66-4131-a4da-cf7cd18040a4";
 const TABULAR_API = `https://tabular-api.data.gouv.fr/api/resources/${DVF_RESOURCE_ID}/data/`;
@@ -8,9 +9,22 @@ export async function GET(req: NextRequest) {
   const postalCode = searchParams.get("postalCode")?.trim();
   const type = searchParams.get("type"); // Appartement | Maison
   const surface = parseFloat(searchParams.get("surface") || "0");
+  const proToken = searchParams.get("token"); // pro users pass their token
 
   if (!postalCode || !type || !surface || surface <= 0) {
     return NextResponse.json({ error: "Paramètres manquants ou invalides." }, { status: 400 });
+  }
+
+  // Rate limiting
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0] ?? req.headers.get("x-real-ip") ?? "unknown";
+  const isPro = proToken === process.env.PRO_SECRET_TOKEN;
+  const { allowed, remaining } = checkRateLimit(ip, isPro);
+
+  if (!allowed) {
+    return NextResponse.json(
+      { error: "Limite gratuite atteinte (5/jour). Passez en Pro pour un accès illimité.", upgrade: true },
+      { status: 429 }
+    );
   }
 
   if (!/^\d{5}$/.test(postalCode)) {
@@ -21,17 +35,19 @@ export async function GET(req: NextRequest) {
     const params = new URLSearchParams({
       code_postal__exact: postalCode,
       type_local__exact: type,
-      page_size: "500",
+      page_size: "200",
     });
 
     const url = `${TABULAR_API}?${params.toString()}`;
     const res = await fetch(url, {
-      next: { revalidate: 3600 },
       headers: { "Accept": "application/json" },
+      cache: "no-store",
     });
 
     if (!res.ok) {
-      return NextResponse.json({ error: "Service DVF indisponible. Réessayez dans un instant." }, { status: 502 });
+      const text = await res.text().catch(() => "");
+      console.error("DVF API error:", res.status, text.slice(0, 200));
+      return NextResponse.json({ error: `Service DVF indisponible (${res.status}). Réessayez dans un instant.` }, { status: 502 });
     }
 
     const json = await res.json();
@@ -92,9 +108,11 @@ export async function GET(req: NextRequest) {
       comparableSales: valid.length,
       totalFound: json.meta?.total ?? rows.length,
       lastSaleDate,
+      remainingToday: remaining,
     });
   } catch (err) {
-    console.error(err);
-    return NextResponse.json({ error: "Erreur interne." }, { status: 500 });
+    console.error("Estimate route error:", err);
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: `Erreur interne: ${message}` }, { status: 500 });
   }
 }
