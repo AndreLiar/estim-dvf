@@ -143,11 +143,42 @@ CREATE TABLE market_cache (
 -- No RLS — read/written by service role only
 
 
--- ─── SEED: PRO USERS ──────────────────────────────────────────────────────────
--- Run AFTER both users have signed up via /login (so auth.users rows exist).
--- If they haven't signed up yet, user_id will be NULL and auto-linked on first login
--- via a trigger (see below), or you can re-run the UPDATE after signup.
+-- ─── SEED: AUTH USERS ─────────────────────────────────────────────────────────
+-- Creates both users in auth.users with confirmed emails and hashed passwords.
+-- Passwords: kanmegneandre@gmail.com → Estimdvf2025!
+--            kanmegnea@gmail.com     → Estimdvf2025!
+-- Change these after first login.
 
+INSERT INTO auth.users (
+  id, instance_id, email, encrypted_password, email_confirmed_at,
+  raw_app_meta_data, raw_user_meta_data,
+  created_at, updated_at, role, aud
+)
+VALUES
+  (
+    gen_random_uuid(),
+    '00000000-0000-0000-0000-000000000000',
+    'kanmegneandre@gmail.com',
+    crypt('Estimdvf2025!', gen_salt('bf')),
+    now(),
+    '{"provider":"email","providers":["email"]}',
+    '{}',
+    now(), now(), 'authenticated', 'authenticated'
+  ),
+  (
+    gen_random_uuid(),
+    '00000000-0000-0000-0000-000000000000',
+    'kanmegnea@gmail.com',
+    crypt('Estimdvf2025!', gen_salt('bf')),
+    now(),
+    '{"provider":"email","providers":["email"]}',
+    '{}',
+    now(), now(), 'authenticated', 'authenticated'
+  )
+ON CONFLICT (email) DO NOTHING;
+
+
+-- ─── SEED: PRO USERS ──────────────────────────────────────────────────────────
 INSERT INTO pro_users (email, plan, active)
 VALUES
   ('kanmegneandre@gmail.com', 'pro', true),
@@ -155,14 +186,14 @@ VALUES
 ON CONFLICT (email) DO UPDATE
   SET plan = EXCLUDED.plan, active = true;
 
--- Link user_id if auth users already exist
+-- Link user_id from auth.users
 UPDATE pro_users p
 SET user_id = u.id
 FROM auth.users u
 WHERE p.email = u.email
   AND p.user_id IS NULL;
 
--- Generate an API key for the api-plan user if not already set
+-- Generate an API key for the api-plan user
 UPDATE pro_users
 SET api_key = 'dvf_' || substr(md5(random()::text || clock_timestamp()::text), 1, 40)
 WHERE email = 'kanmegnea@gmail.com'
