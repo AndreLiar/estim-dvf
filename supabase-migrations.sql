@@ -154,28 +154,22 @@ INSERT INTO auth.users (
   raw_app_meta_data, raw_user_meta_data,
   created_at, updated_at, role, aud
 )
-VALUES
-  (
-    gen_random_uuid(),
-    '00000000-0000-0000-0000-000000000000',
-    'kanmegneandre@gmail.com',
-    crypt('Estimdvf2025!', gen_salt('bf')),
-    now(),
-    '{"provider":"email","providers":["email"]}',
-    '{}',
-    now(), now(), 'authenticated', 'authenticated'
-  ),
-  (
-    gen_random_uuid(),
-    '00000000-0000-0000-0000-000000000000',
-    'kanmegnea@gmail.com',
-    crypt('Estimdvf2025!', gen_salt('bf')),
-    now(),
-    '{"provider":"email","providers":["email"]}',
-    '{}',
-    now(), now(), 'authenticated', 'authenticated'
-  )
-ON CONFLICT (email) DO NOTHING;
+SELECT
+  gen_random_uuid(),
+  '00000000-0000-0000-0000-000000000000',
+  u.email,
+  crypt('Estimdvf2025!', gen_salt('bf')),
+  now(),
+  '{"provider":"email","providers":["email"]}',
+  '{}',
+  now(), now(), 'authenticated', 'authenticated'
+FROM (VALUES
+  ('kanmegneandre@gmail.com'),
+  ('kanmegnea@gmail.com')
+) AS u(email)
+WHERE NOT EXISTS (
+  SELECT 1 FROM auth.users WHERE email = u.email
+);
 
 
 -- ─── SEED: PRO USERS ──────────────────────────────────────────────────────────
