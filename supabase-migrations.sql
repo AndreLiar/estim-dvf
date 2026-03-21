@@ -54,15 +54,15 @@ CREATE INDEX idx_usage_log_ip_time ON usage_log(ip, created_at);
 
 -- ─── PRICE ALERTS ─────────────────────────────────────────────────────────────
 CREATE TABLE price_alerts (
-  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id       UUID        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  code_postal   TEXT        NOT NULL,
-  type_local    TEXT        NOT NULL DEFAULT 'Appartement',
+  id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID         NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  code_postal   TEXT         NOT NULL,
+  type_local    TEXT         NOT NULL DEFAULT 'Appartement',
   threshold_pct NUMERIC(5,2) NOT NULL DEFAULT 5.0,
   last_median   NUMERIC(10,2),
   last_checked  TIMESTAMPTZ,
-  active        BOOLEAN     NOT NULL DEFAULT true,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  active        BOOLEAN      NOT NULL DEFAULT true,
+  created_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_price_alerts_user   ON price_alerts(user_id);
@@ -77,9 +77,9 @@ CREATE POLICY "own alerts" ON price_alerts
 -- ─── ALERT HISTORY ────────────────────────────────────────────────────────────
 -- Immutable log of every alert that fired.
 CREATE TABLE alert_history (
-  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  alert_id   UUID        NOT NULL REFERENCES price_alerts(id) ON DELETE CASCADE,
-  sent_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  id         UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  alert_id   UUID         NOT NULL REFERENCES price_alerts(id) ON DELETE CASCADE,
+  sent_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
   old_median NUMERIC(10,2),
   new_median NUMERIC(10,2),
   change_pct NUMERIC(6,2)
@@ -92,18 +92,18 @@ CREATE INDEX idx_alert_history_alert ON alert_history(alert_id);
 
 -- ─── PORTFOLIO PROPERTIES ─────────────────────────────────────────────────────
 CREATE TABLE portfolio_properties (
-  id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id               UUID        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  id                    UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id               UUID          NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   label                 TEXT,
   adresse               TEXT,
-  code_postal           TEXT        NOT NULL,
-  type_local            TEXT        NOT NULL DEFAULT 'Appartement',
-  surface_m2            NUMERIC(8,2) NOT NULL,
+  code_postal           TEXT          NOT NULL,
+  type_local            TEXT          NOT NULL DEFAULT 'Appartement',
+  surface_m2            NUMERIC(8,2)  NOT NULL,
   purchase_price        NUMERIC(12,2) NOT NULL,
-  purchase_date         DATE        NOT NULL,
+  purchase_date         DATE          NOT NULL,
   current_median_per_m2 NUMERIC(10,2),
   estimate_updated_at   TIMESTAMPTZ,
-  created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at            TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_portfolio_user ON portfolio_properties(user_id);
@@ -118,10 +118,10 @@ CREATE POLICY "own properties" ON portfolio_properties
 -- 24h cache of DVF market stats per postal code + property type.
 -- Columns match what services/market.ts reads and writes.
 CREATE TABLE market_cache (
-  code_postal     TEXT        NOT NULL,
-  type_local      TEXT        NOT NULL,
-  cached_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  -- Core stats
+  code_postal     TEXT         NOT NULL,
+  type_local      TEXT         NOT NULL,
+  cached_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  -- Core stats (used by services/market.ts)
   median_per_m2   NUMERIC(10,2),
   avg_per_m2      NUMERIC(10,2),
   p10_per_m2      NUMERIC(10,2),
@@ -131,7 +131,7 @@ CREATE TABLE market_cache (
   last_sale_date  TEXT,
   city_name       TEXT,
   price_history   JSONB,
-  -- Legacy columns kept for backwards compat (used by cron/alerts)
+  -- Legacy columns kept for cron/alerts compatibility
   median_12m      NUMERIC(10,2),
   median_prev_12m NUMERIC(10,2),
   volume_12m      INTEGER,
