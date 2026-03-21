@@ -1,18 +1,18 @@
-import { supabaseAdmin } from "./supabase";
+import { supabaseAdmin } from "./supabaseAdmin";
 
 const FREE_LIMIT = 5;
 
 export async function checkRateLimit(
   ip: string,
-  proToken: string | null
+  userId: string | null
 ): Promise<{ allowed: boolean; remaining: number; isPro: boolean }> {
 
-  // Check if token is valid Pro token
-  if (proToken) {
+  // Check if logged-in user has active Pro subscription
+  if (userId) {
     const { data } = await supabaseAdmin
       .from("pro_users")
       .select("id")
-      .eq("token", proToken)
+      .eq("user_id", userId)
       .eq("active", true)
       .single();
 
@@ -35,7 +35,6 @@ export async function checkRateLimit(
     return { allowed: false, remaining: 0, isPro: false };
   }
 
-  // Log this request
   await supabaseAdmin.from("usage_log").insert({ ip });
 
   return { allowed: true, remaining: FREE_LIMIT - used - 1, isPro: false };

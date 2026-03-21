@@ -1,11 +1,9 @@
-import { createClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-// Public client — for frontend use
-export const supabase = createClient(url, anonKey);
-
-// Admin client — for server-side only (webhooks, API routes)
-export const supabaseAdmin = createClient(url, serviceKey);
+// Browser client — for use in client components only
+export function createSupabaseBrowser() {
+  return createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+}
