@@ -1076,6 +1076,15 @@ h1 em {
   .features-grid { grid-template-columns: repeat(2, 1fr); }
   .pricing-grid { grid-template-columns: 1fr; max-width: 400px; margin: 0 auto; }
   .pricing-card.featured { transform: none; }
+  /* Platform sections */
+  section [style*="grid-template-columns: 1fr 1fr"],
+  section [style*="grid-template-columns: 1.1fr 1fr"],
+  section [style*="grid-template-columns: repeat(4, 1fr)"] {
+    grid-template-columns: 1fr !important;
+  }
+  section [style*="grid-template-columns: repeat(4, 1fr)"] > div {
+    padding: 0 0.5rem !important;
+  }
 }
 
 @media (max-width: 640px) {
