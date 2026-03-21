@@ -4,23 +4,26 @@ import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase";
 
+type Mode = "login" | "signup";
+
 function LoginForm() {
   const searchParams = useSearchParams();
-  const plan = searchParams.get("plan"); // "pro" | "api" | null
-  const next = searchParams.get("next"); // arbitrary redirect after login
+  const plan = searchParams.get("plan");
+  const next = searchParams.get("next");
 
+  const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
-  // If already logged in, send straight to checkout or dashboard
+  // If already logged in, redirect
   useEffect(() => {
     const supabase = createSupabaseBrowser();
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return;
       if (plan) {
-        // Already authenticated → go straight to checkout
         const res = await fetch("/api/checkout", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -37,25 +40,38 @@ function LoginForm() {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setSuccess(null);
 
     const supabase = createSupabaseBrowser();
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "https://dvfestimator.live";
 
-    // Build the redirect URL — after magic link click, go to checkout or dashboard
-    const callbackNext = plan
-      ? `/api/checkout-redirect?plan=${plan}`
-      : (next ?? "/dashboard");
-
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${baseUrl}/auth/callback?next=${encodeURIComponent(callbackNext)}` },
-    });
-
-    if (error) {
-      setError(error.message);
+    if (mode === "signup") {
+      const { error } = await supabase.auth.signUp({ email, password });
+      if (error) {
+        setError(error.message);
+      } else {
+        setSuccess("Compte créé ! Vérifiez votre email pour confirmer votre adresse, puis connectez-vous.");
+        setMode("login");
+      }
     } else {
-      setSent(true);
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        setError(error.message === "Invalid login credentials"
+          ? "Email ou mot de passe incorrect."
+          : error.message);
+      } else {
+        if (plan) {
+          const res = await fetch("/api/checkout", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ plan }),
+          });
+          const json = await res.json();
+          if (json.url) { window.location.href = json.url; return; }
+        }
+        window.location.href = next ?? "/dashboard";
+      }
     }
+
     setLoading(false);
   }
 
@@ -88,12 +104,44 @@ function LoginForm() {
         <div className="card">
           <div className="card-header">
             <span className="card-header-title">
-              {planLabel ? `Accès ${planLabel}` : "Connexion"}
+              {planLabel ? `Accès ${planLabel}` : (mode === "signup" ? "Créer un compte" : "Connexion")}
             </span>
-            <span className="card-header-tag">Magic Link</span>
           </div>
           <div className="card-body">
-            {planLabel && !sent && (
+            {/* Mode toggle */}
+            <div style={{
+              display: "flex",
+              background: "var(--surface)",
+              borderRadius: "var(--radius)",
+              padding: "3px",
+              marginBottom: "1.5rem",
+            }}>
+              {(["login", "signup"] as Mode[]).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => { setMode(m); setError(null); setSuccess(null); }}
+                  style={{
+                    flex: 1,
+                    padding: "0.45rem",
+                    border: "none",
+                    borderRadius: "calc(var(--radius) - 2px)",
+                    background: mode === m ? "var(--white)" : "transparent",
+                    boxShadow: mode === m ? "var(--shadow-sm)" : "none",
+                    color: mode === m ? "var(--navy)" : "var(--text-muted)",
+                    fontFamily: "'IBM Plex Sans', sans-serif",
+                    fontWeight: mode === m ? 600 : 400,
+                    fontSize: "0.85rem",
+                    cursor: "pointer",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  {m === "login" ? "Se connecter" : "Créer un compte"}
+                </button>
+              ))}
+            </div>
+
+            {planLabel && (
               <div style={{
                 background: "var(--blue-glow)",
                 border: "1px solid rgba(26,86,219,0.15)",
@@ -104,49 +152,61 @@ function LoginForm() {
                 color: "var(--text-secondary)",
                 lineHeight: 1.55,
               }}>
-                Entrez votre email pour créer votre compte et accéder au paiement sécurisé&nbsp;{planLabel}.
+                {mode === "signup"
+                  ? `Créez votre compte pour accéder au paiement sécurisé ${planLabel}.`
+                  : `Connectez-vous pour accéder au paiement sécurisé ${planLabel}.`}
               </div>
             )}
 
-            {sent ? (
-              <div style={{ textAlign: "center", padding: "1rem 0" }}>
-                <div style={{ fontSize: "2.5rem", marginBottom: "1rem" }}>✉️</div>
-                <p style={{ fontFamily: "'Syne', sans-serif", fontSize: "1.1rem", fontWeight: 700, color: "var(--navy)", marginBottom: "0.75rem" }}>
-                  Vérifiez votre email
-                </p>
-                <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                  Lien envoyé à <strong style={{ color: "var(--navy)" }}>{email}</strong>.<br />
-                  {plan
-                    ? "Cliquez dessus pour finaliser votre abonnement."
-                    : "Cliquez dessus pour accéder à votre compte."}
-                </p>
+            {success && (
+              <div style={{
+                background: "var(--green-light)",
+                border: "1px solid rgba(5,150,105,0.2)",
+                borderRadius: "var(--radius)",
+                padding: "0.875rem 1rem",
+                marginBottom: "1.25rem",
+                fontSize: "0.85rem",
+                color: "var(--green)",
+                lineHeight: 1.55,
+              }}>
+                {success}
               </div>
-            ) : (
-              <form onSubmit={handleSubmit}>
-                <div className="form-group">
-                  <label>Adresse email</label>
-                  <input
-                    type="email"
-                    placeholder="vous@exemple.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    autoFocus
-                  />
-                </div>
-                {error && <div className="error-box" style={{ marginBottom: "1rem" }}>{error}</div>}
-                <button type="submit" className="submit-btn" disabled={loading}>
-                  {loading
-                    ? "Envoi en cours..."
-                    : plan
-                      ? "Continuer vers le paiement →"
-                      : "Recevoir le lien de connexion"}
-                </button>
-                <p style={{ marginTop: "1rem", fontSize: "0.75rem", color: "var(--text-muted)", textAlign: "center" }}>
-                  Pas de mot de passe. Un lien sécurisé est envoyé par email.
-                </p>
-              </form>
             )}
+
+            <form onSubmit={handleSubmit}>
+              <div className="form-group">
+                <label>Adresse email</label>
+                <input
+                  type="email"
+                  placeholder="vous@exemple.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  autoFocus
+                />
+              </div>
+              <div className="form-group">
+                <label>Mot de passe</label>
+                <input
+                  type="password"
+                  placeholder={mode === "signup" ? "Minimum 6 caractères" : "Votre mot de passe"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={mode === "signup" ? 6 : undefined}
+                />
+              </div>
+              {error && <div className="error-box" style={{ marginBottom: "1rem" }}>{error}</div>}
+              <button type="submit" className="submit-btn" disabled={loading}>
+                {loading
+                  ? "Chargement..."
+                  : mode === "signup"
+                    ? "Créer mon compte"
+                    : plan
+                      ? "Se connecter et payer →"
+                      : "Se connecter"}
+              </button>
+            </form>
           </div>
         </div>
 
