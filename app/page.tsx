@@ -30,7 +30,16 @@ function fmtShort(n: number) {
   return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(n) + " €";
 }
 
-async function startCheckout(plan: string) {
+/**
+ * Handles upgrade CTA clicks.
+ * - If logged in: go straight to Stripe checkout.
+ * - If anonymous: go to /login?plan=X where the login page triggers checkout after auth.
+ */
+async function handleUpgrade(plan: string, isLoggedIn: boolean) {
+  if (!isLoggedIn) {
+    window.location.href = `/login?plan=${plan}`;
+    return;
+  }
   const res = await fetch("/api/checkout", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -141,9 +150,9 @@ function EstimatorForm({ user }: { user: User | null }) {
             {error}
             {limitReached && (
               <div style={{ marginTop: "0.75rem" }}>
-                <button onClick={() => startCheckout("pro")} className="btn btn-primary" style={{ fontSize: "0.78rem" }}>
+                <a href="/login?plan=pro" className="btn btn-primary" style={{ fontSize: "0.78rem" }}>
                   Passer en Pro — 49€/mois
-                </button>
+                </a>
               </div>
             )}
           </div>
@@ -193,9 +202,9 @@ function EstimatorForm({ user }: { user: User | null }) {
                 <div className="upsell-text">
                   <strong>Pro</strong> — Alertes de prix, suivi de portefeuille, historique complet, widget intégrable.
                 </div>
-                <button onClick={() => startCheckout("pro")} className="btn btn-outline" style={{ whiteSpace: "nowrap", fontSize: "0.75rem" }}>
+                <a href="/login?plan=pro" className="btn btn-outline" style={{ whiteSpace: "nowrap", fontSize: "0.75rem" }}>
                   49€ / mois
-                </button>
+                </a>
               </div>
             )}
             <div className="result-footer">
@@ -325,7 +334,7 @@ export default function Home() {
           ) : (
             <>
               <a href="/login" className="btn btn-ghost" style={{ fontSize: "0.8rem" }}>Connexion</a>
-              <button onClick={() => startCheckout("pro")} className="btn btn-primary" style={{ fontSize: "0.8rem" }}>Accès Pro</button>
+              <a href="/login?plan=pro" className="btn btn-primary" style={{ fontSize: "0.8rem" }}>Accès Pro</a>
             </>
           )}
         </div>
@@ -604,7 +613,9 @@ export default function Home() {
                   </div>
                 ))}
               </div>
-              <a href="/alerts" className="btn btn-primary" style={{ fontSize: "0.85rem" }}>Configurer mes alertes →</a>
+              <a href={user ? "/alerts" : "/login?plan=pro"} className="btn btn-primary" style={{ fontSize: "0.85rem" }}>
+                {user ? "Configurer mes alertes →" : "Démarrer avec Pro →"}
+              </a>
             </div>
           </div>
 
@@ -626,7 +637,9 @@ export default function Home() {
                   </div>
                 ))}
               </div>
-              <a href="/portfolio" className="btn btn-primary" style={{ fontSize: "0.85rem" }}>Gérer mon portefeuille →</a>
+              <a href={user ? "/portfolio" : "/login?plan=pro"} className="btn btn-primary" style={{ fontSize: "0.85rem" }}>
+                {user ? "Gérer mon portefeuille →" : "Démarrer avec Pro →"}
+              </a>
             </div>
           </div>
         </div>
@@ -646,7 +659,9 @@ export default function Home() {
               <br />{"  ?type=Appartement&theme=light\""}
               <br />{"  width=\"360\" height=\"340\" frameborder=\"0\" />"}
             </div>
-            <a href="#tarifs" className="btn btn-primary">Obtenir l&apos;accès widget →</a>
+            <button onClick={() => handleUpgrade("pro", !!user)} className="btn btn-primary">
+              {user ? "Activer le widget →" : "Obtenir l'accès widget →"}
+            </button>
           </div>
           {/* Widget preview */}
           <div style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-xl)", overflow: "hidden", boxShadow: "var(--shadow-lg)" }}>
@@ -699,8 +714,8 @@ export default function Home() {
                 <li>Données DVF officielles</li>
                 <li>Analyse de marché (lecture)</li>
               </ul>
-              <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} className="btn btn-ghost btn-full">
-                Commencer gratuitement
+              <button onClick={() => document.querySelector(".estimator-section")?.scrollIntoView({ behavior: "smooth" })} className="btn btn-ghost btn-full">
+                Essayer gratuitement
               </button>
             </div>
 
@@ -719,8 +734,8 @@ export default function Home() {
                 <li>Export PDF du rapport</li>
                 <li>Support prioritaire</li>
               </ul>
-              <button onClick={() => startCheckout("pro")} className="btn btn-full">
-                Démarrer l&apos;essai
+              <button onClick={() => handleUpgrade("pro", !!user)} className="btn btn-full">
+                {user ? "Passer au Pro →" : "Créer un compte & payer →"}
               </button>
             </div>
 
@@ -738,8 +753,8 @@ export default function Home() {
                 <li>Rotation de clé self-service</li>
                 <li>Support dédié</li>
               </ul>
-              <button onClick={() => startCheckout("api")} className="btn btn-ghost btn-full">
-                Commencer
+              <button onClick={() => handleUpgrade("api", !!user)} className="btn btn-ghost btn-full">
+                {user ? "Passer au plan API →" : "Créer un compte & payer →"}
               </button>
             </div>
           </div>
