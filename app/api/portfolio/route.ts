@@ -1,47 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { getProUserFromToken } from "@/services/auth";
+import { listProperties, addProperty } from "@/services/portfolio";
 import { fetchDvfStats } from "@/lib/dvf";
+import type { PropertyType } from "@/types";
 
-async function getProUser(req: NextRequest) {
+function extractToken(req: NextRequest): string | null {
   const auth = req.headers.get("authorization");
-  if (!auth?.startsWith("Bearer ")) return null;
-  const { data } = await supabaseAdmin.auth.getUser(auth.slice(7));
-  if (!data.user) return null;
-  const { data: pro } = await supabaseAdmin
-    .from("pro_users")
-    .select("user_id")
-    .eq("user_id", data.user.id)
-    .eq("active", true)
-    .single();
-  return pro ? data.user : null;
+  return auth?.startsWith("Bearer ") ? auth.slice(7) : null;
 }
 
 export async function GET(req: NextRequest) {
-  const user = await getProUser(req);
+  const token = extractToken(req);
+  if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const user = await getProUserFromToken(token);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { data } = await supabaseAdmin
-    .from("portfolio_properties")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
-
-  return NextResponse.json(data ?? []);
+  const properties = await listProperties(user.id);
+  return NextResponse.json(properties);
 }
 
 export async function POST(req: NextRequest) {
-  const user = await getProUser(req);
+  const token = extractToken(req);
+  if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const user = await getProUserFromToken(token);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  // Check limit (20 properties for Pro)
-  const { count } = await supabaseAdmin
-    .from("portfolio_properties")
-    .select("*", { count: "exact", head: true })
-    .eq("user_id", user.id);
-
-  if ((count ?? 0) >= 20) {
-    return NextResponse.json({ error: "Limite de 20 biens atteinte" }, { status: 429 });
-  }
 
   const body = await req.json();
   const { label, adresse, code_postal, type_local, surface_m2, purchase_price, purchase_date } = body;
@@ -50,27 +34,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Champs manquants" }, { status: 400 });
   }
 
-  // Get current DVF median
-  const stats = await fetchDvfStats(code_postal, type_local ?? "Appartement");
-  const current_median_per_m2 = stats?.medianPerM2 ?? null;
+  const typeLocal = (type_local ?? "Appartement") as PropertyType;
+  const stats = await fetchDvfStats(code_postal, typeLocal, 3);
+  const currentMedianPerM2 = stats?.medianPerM2 ?? null;
 
-  const { data, error } = await supabaseAdmin
-    .from("portfolio_properties")
-    .insert({
-      user_id: user.id,
+  try {
+    const property = await addProperty({
+      userId: user.id,
       label,
       adresse,
-      code_postal,
-      type_local: type_local ?? "Appartement",
-      surface_m2,
-      purchase_price,
-      purchase_date,
-      current_median_per_m2,
-      estimate_updated_at: current_median_per_m2 ? new Date().toISOString() : null,
-    })
-    .select()
-    .single();
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(data);
+      codePostal: code_postal,
+      typeLocal,
+      surfaceM2: Number(surface_m2),
+      purchasePrice: Number(purchase_price),
+      purchaseDate: purchase_date,
+      currentMedianPerM2,
+    });
+    return NextResponse.json(property);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Erreur";
+    const status = msg.includes("Limite") ? 429 : 500;
+    return NextResponse.json({ error: msg }, { status });
+  }
 }

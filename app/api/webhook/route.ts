@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { generateApiKey } from "@/lib/apiKey";
+import {
+  listAuthUsers,
+  createAuthUserAndSendMagicLink,
+  sendMagicLink,
+  upsertProUser,
+  deactivateProByEmail,
+} from "@/services/auth";
+import { provisionApiKey } from "@/services/apiKeys";
+import type { Plan } from "@/types";
 
 export async function POST(req: NextRequest) {
   const stripeKey = process.env.STRIPE_SECRET_KEY;
@@ -25,61 +32,34 @@ export async function POST(req: NextRequest) {
   switch (event.type) {
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
-      const email = session.customer_details?.email;
+      const email = session.customer_details?.email?.toLowerCase();
       const customerId = session.customer as string;
-      const plan = session.metadata?.plan ?? "pro";
+      const plan = (session.metadata?.plan ?? "pro") as Plan;
 
-      if (email) {
-        // Create or get Supabase auth user
-        const { data: existingUser } = await supabaseAdmin.auth.admin.listUsers();
-        const found = existingUser.users.find((u) => u.email === email.toLowerCase());
+      if (!email) break;
 
-        let userId: string;
+      // Find or create auth user
+      const existingUsers = await listAuthUsers();
+      const found = existingUsers.find((u) => u.email === email);
 
-        if (found) {
-          userId = found.id;
-        } else {
-          // Create user and send magic link to log in
-          const { data: newUser, error } = await supabaseAdmin.auth.admin.createUser({
-            email: email.toLowerCase(),
-            email_confirm: true,
-          });
-          if (error || !newUser.user) {
-            console.error("Failed to create user:", error);
-            break;
-          }
-          userId = newUser.user.id;
-        }
-
-        // Generate API key for api plan (or if they don't have one yet)
-        const { data: existing } = await supabaseAdmin
-          .from("pro_users")
-          .select("api_key")
-          .eq("email", email.toLowerCase())
-          .single();
-
-        const apiKey = existing?.api_key ?? (plan === "api" ? generateApiKey() : null);
-
-        // Save Pro subscription linked to user_id
-        await supabaseAdmin.from("pro_users").upsert({
-          user_id: userId,
-          email: email.toLowerCase(),
-          plan,
-          stripe_customer_id: customerId,
-          active: true,
-          ...(apiKey ? { api_key: apiKey } : {}),
-        }, { onConflict: "email" });
-
-        // Send magic link so user can log in immediately
-        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "https://dvfestimator.live";
-        await supabaseAdmin.auth.admin.generateLink({
-          type: "magiclink",
-          email: email.toLowerCase(),
-          options: { redirectTo: `${baseUrl}/dashboard` },
-        });
-
-        console.log(`Pro activated for ${email} (user: ${userId})`);
+      let userId: string;
+      if (found) {
+        userId = found.id;
+        await sendMagicLink(email);
+      } else {
+        const newId = await createAuthUserAndSendMagicLink(email);
+        if (!newId) break;
+        userId = newId;
       }
+
+      // Provision API key if needed
+      let apiKey: string | undefined;
+      if (plan === "api") {
+        apiKey = await provisionApiKey(email);
+      }
+
+      await upsertProUser({ userId, email, plan, stripeCustomerId: customerId, apiKey });
+      console.log(`Pro activated: ${email} plan=${plan} user=${userId}`);
       break;
     }
 
@@ -87,10 +67,7 @@ export async function POST(req: NextRequest) {
       const sub = event.data.object as Stripe.Subscription;
       const customer = await stripe.customers.retrieve(sub.customer as string);
       if (!customer.deleted && customer.email) {
-        await supabaseAdmin
-          .from("pro_users")
-          .update({ active: false })
-          .eq("email", customer.email.toLowerCase());
+        await deactivateProByEmail(customer.email.toLowerCase());
       }
       break;
     }

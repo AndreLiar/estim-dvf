@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { fetchDvfStats } from "@/lib/dvf";
 import { Resend } from "resend";
+import { fetchDvfStats } from "@/lib/dvf";
+import { listAllActiveAlerts, updateAlertBaseline, recordAlertFired } from "@/services/alerts";
+import { getUserEmailById } from "@/services/auth";
 
 export async function POST(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -13,52 +14,45 @@ export async function POST(req: NextRequest) {
   const resend = new Resend(process.env.RESEND_API_KEY);
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "https://dvfestimator.live";
 
-  const { data: alerts } = await supabaseAdmin
-    .from("price_alerts")
-    .select("*")
-    .eq("active", true);
-
-  if (!alerts?.length) return NextResponse.json({ processed: 0 });
+  const alerts = await listAllActiveAlerts();
+  if (!alerts.length) return NextResponse.json({ processed: 0 });
 
   let fired = 0;
   for (const alert of alerts) {
     try {
-      const stats = await fetchDvfStats(alert.code_postal, alert.type_local);
+      const stats = await fetchDvfStats(alert.codePostal, alert.typeLocal);
       if (!stats) continue;
 
       const newMedian = stats.medianPerM2;
-      const oldMedian = alert.last_median;
+      const oldMedian = alert.lastMedian;
 
-      // Update baseline
-      await supabaseAdmin
-        .from("price_alerts")
-        .update({ last_median: newMedian, last_checked: new Date().toISOString() })
-        .eq("id", alert.id);
+      // Always update baseline timestamp
+      await updateAlertBaseline(alert.id, newMedian);
 
       if (!oldMedian) continue;
 
       const changePct = ((newMedian - oldMedian) / oldMedian) * 100;
-      if (Math.abs(changePct) < alert.threshold_pct) continue;
+      if (Math.abs(changePct) < alert.thresholdPct) continue;
 
       // Get user email
-      const { data: userData } = await supabaseAdmin.auth.admin.getUserById(alert.user_id);
-      const email = userData.user?.email;
+      const email = await getUserEmailById(alert.userId);
       if (!email) continue;
 
       const direction = changePct > 0 ? "hausse" : "baisse";
-      const fmt = (n: number) => new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(n);
+      const fmt = (n: number) =>
+        new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(n);
 
       await resend.emails.send({
         from: "EstimDVF <alerts@dvfestimator.live>",
         to: email,
-        subject: `Alerte prix · ${alert.code_postal} · ${direction} de ${Math.abs(changePct).toFixed(1)}%`,
+        subject: `Alerte prix · ${alert.codePostal} · ${direction} de ${Math.abs(changePct).toFixed(1)}%`,
         html: `
           <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;padding:2rem">
             <div style="font-size:1.1rem;font-weight:700;color:#0d1b3e;margin-bottom:1rem">
               📈 Alerte marché EstimDVF
             </div>
-            <p style="color:#4a5568">Le marché immobilier de <strong>${alert.code_postal}</strong>
-            (${alert.type_local}) a évolué significativement.</p>
+            <p style="color:#4a5568">Le marché immobilier de <strong>${alert.codePostal}</strong>
+            (${alert.typeLocal}) a évolué significativement.</p>
             <div style="background:#f2f4f8;border-radius:8px;padding:1.5rem;margin:1.5rem 0">
               <div style="font-size:0.75rem;color:#8896aa;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:0.5rem">
                 Variation annuelle
@@ -77,7 +71,7 @@ export async function POST(req: NextRequest) {
                 </div>
               </div>
             </div>
-            <a href="${baseUrl}/market/${alert.code_postal}"
+            <a href="${baseUrl}/market/${alert.codePostal}"
                style="display:inline-block;background:#1a56db;color:#fff;padding:0.75rem 1.5rem;border-radius:8px;text-decoration:none;font-weight:600;font-size:0.875rem">
               Voir le marché →
             </a>
@@ -88,11 +82,11 @@ export async function POST(req: NextRequest) {
         `,
       });
 
-      await supabaseAdmin.from("alert_history").insert({
-        alert_id: alert.id,
-        old_median: oldMedian,
-        new_median: newMedian,
-        change_pct: changePct,
+      await recordAlertFired({
+        alertId: alert.id,
+        oldMedian,
+        newMedian,
+        changePct,
       });
 
       fired++;

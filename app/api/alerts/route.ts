@@ -1,37 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { getProUserFromToken } from "@/services/auth";
+import { listAlerts, createAlert } from "@/services/alerts";
 import { fetchDvfStats } from "@/lib/dvf";
+import type { PropertyType } from "@/types";
 
-async function getProUser(req: NextRequest) {
+function extractToken(req: NextRequest): string | null {
   const auth = req.headers.get("authorization");
-  if (!auth?.startsWith("Bearer ")) return null;
-  const { data } = await supabaseAdmin.auth.getUser(auth.slice(7));
-  if (!data.user) return null;
-  const { data: pro } = await supabaseAdmin
-    .from("pro_users")
-    .select("user_id")
-    .eq("user_id", data.user.id)
-    .eq("active", true)
-    .single();
-  return pro ? data.user : null;
+  return auth?.startsWith("Bearer ") ? auth.slice(7) : null;
 }
 
 export async function GET(req: NextRequest) {
-  const user = await getProUser(req);
+  const token = extractToken(req);
+  if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const user = await getProUserFromToken(token);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { data } = await supabaseAdmin
-    .from("price_alerts")
-    .select("*")
-    .eq("user_id", user.id)
-    .eq("active", true)
-    .order("created_at", { ascending: false });
-
-  return NextResponse.json(data ?? []);
+  const alerts = await listAlerts(user.id);
+  return NextResponse.json(alerts);
 }
 
 export async function POST(req: NextRequest) {
-  const user = await getProUser(req);
+  const token = extractToken(req);
+  if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const user = await getProUserFromToken(token);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { code_postal, type_local, threshold_pct } = await req.json();
@@ -39,23 +32,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Code postal invalide" }, { status: 400 });
   }
 
-  // Fetch current median as baseline
-  const stats = await fetchDvfStats(code_postal, type_local ?? "Appartement");
-  const last_median = stats?.medianPerM2 ?? null;
+  const typeLocal = (type_local ?? "Appartement") as PropertyType;
+  const stats = await fetchDvfStats(code_postal, typeLocal, 3);
+  const lastMedian = stats?.medianPerM2 ?? null;
 
-  const { data, error } = await supabaseAdmin
-    .from("price_alerts")
-    .insert({
-      user_id: user.id,
-      code_postal,
-      type_local: type_local ?? "Appartement",
-      threshold_pct: threshold_pct ?? 5,
-      last_median,
-      last_checked: new Date().toISOString(),
-    })
-    .select()
-    .single();
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(data);
+  try {
+    const alert = await createAlert({
+      userId: user.id,
+      codePostal: code_postal,
+      typeLocal,
+      thresholdPct: threshold_pct ?? 5,
+      lastMedian,
+    });
+    return NextResponse.json(alert);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Erreur";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }
