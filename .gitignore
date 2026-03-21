@@ -5,3 +5,6 @@ node_modules/
 .env*.local
 
 .vercel
+
+# Database — contains passwords, never commit
+supabase-migrations.sql
